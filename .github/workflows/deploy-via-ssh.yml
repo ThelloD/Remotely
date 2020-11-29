@@ -199,4 +199,4 @@ jobs:
     - name: Publish
       shell: bash
       run: | 
-        rsync -r -v -W e "ssh -p $SshPort" ./artifact/ $SshUsername@$SshHostname:/var/www/remotely/
+        rsync -r -v -W -e "ssh -p $SshPort" ./artifact/ $SshUsername@$SshHostname:/var/www/remotely/
