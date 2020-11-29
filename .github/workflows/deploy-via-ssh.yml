@@ -26,6 +26,8 @@
 #     - SSH_KNOWN_HOSTS
 #         - The content to go into your known_hosts file.  This should
 #           contain the fingerprint for the SSH host (e.g. "{hostname} {public key}")
+#     - SSH_PORT
+#         - SSH rsync port
 #     - SITE_URL
 #         - The public hostname for the site (e.g. https://app.remotely.one).
 #           This can be an IP if it's only going to be used on the local network
@@ -177,6 +179,7 @@ jobs:
       SshUsername: ${{ secrets.SSH_USERNAME }}
       SshPrivateKey: ${{ secrets.SSH_PRIVATE_KEY }}
       SshHostname: ${{ secrets.SSH_HOSTNAME }}
+      SshPort: ${{ secrets.SSH_PORT }}
     
     steps:
 
@@ -196,4 +199,4 @@ jobs:
     - name: Publish
       shell: bash
       run: | 
-        rsync -r -v -W ./artifact/ $SshUsername@$SshHostname:/var/www/remotely/
+        rsync -r -v -W e "ssh -p $SshPort" ./artifact/ $SshUsername@$SshHostname:/var/www/remotely/
