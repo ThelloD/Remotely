@@ -171,7 +171,13 @@ jobs:
 
     # Remove the pfx
     - name: Remove the pfx
-      run: Remove-Item -path "$env:GITHUB_WORKSPACE\GitHubActionsWorkflow.pfx"
+      run: |
+        if (!($env:PfxBase64)) {
+          echo "Skipping removing cert because Base64_Encoded_Pfx secret is missing."
+          return
+        }
+        
+        Remove-Item -path "$env:GITHUB_WORKSPACE\GitHubActionsWorkflow.pfx"
 
   deploy:
     runs-on: ubuntu-latest
