@@ -17,7 +17,8 @@ namespace Remotely.Agent.Services
         }
 
         private ConfigService ConfigService { get; }
-        private SemaphoreSlim UpdateLock { get; } = new SemaphoreSlim(1);
+        private SemaphoreSlim CheckForUpdatesLock { get; } = new SemaphoreSlim(1, 1);
+        private SemaphoreSlim InstallLatestVersionLock { get; } = new SemaphoreSlim(1, 1);
         private System.Timers.Timer UpdateTimer { get; } = new System.Timers.Timer(TimeSpan.FromHours(6).TotalMilliseconds);
 
 
@@ -33,11 +34,6 @@ namespace Remotely.Agent.Services
             UpdateTimer.Start();
         }
 
-        private async void UpdateTimer_Elapsed(object sender, System.Timers.ElapsedEventArgs e)
-        {
-            await CheckForUpdates();
-        }
-
         public async Task CheckForUpdates()
         {
             try
@@ -47,7 +43,7 @@ namespace Remotely.Agent.Services
                     return;
                 }
 
-                await UpdateLock.WaitAsync();
+                await CheckForUpdatesLock.WaitAsync();
 
                 var connectionInfo = ConfigService.GetConnectionInfo();
                 var serverUrl = ConfigService.GetConnectionInfo().Host;
@@ -80,7 +76,7 @@ namespace Remotely.Agent.Services
                     var wr = WebRequest.CreateHttp(fileUrl);
                     wr.Method = "Head";
                     wr.Headers.Add("If-None-Match", lastEtag);
-                    var response = (HttpWebResponse)await wr.GetResponseAsync();
+                    using var response = (HttpWebResponse)await wr.GetResponseAsync();
                     if (response.StatusCode == HttpStatusCode.NotModified)
                     {
                         Logger.Write("Service Updater: Version is current.");
@@ -104,15 +100,16 @@ namespace Remotely.Agent.Services
             }
             finally
             {
-                UpdateLock.Release();
+                CheckForUpdatesLock.Release();
             }
         }
-
 
         public async Task InstallLatestVersion()
         {
             try
             {
+                await InstallLatestVersionLock.WaitAsync();
+
                 var connectionInfo = ConfigService.GetConnectionInfo();
                 var serverUrl = connectionInfo.Host;
 
@@ -135,7 +132,7 @@ namespace Remotely.Agent.Services
                        serverUrl + $"/api/AgentUpdate/DownloadPackage/win-{platform}/{downloadId}",
                        zipPath);
 
-                    await WebRequest.CreateHttp(serverUrl + $"/api/AgentUpdate/ClearDownload/{downloadId}").GetResponseAsync();
+                    (await WebRequest.CreateHttp(serverUrl + $"/api/AgentUpdate/ClearDownload/{downloadId}").GetResponseAsync()).Dispose();
 
 
                     foreach (var proc in Process.GetProcessesByName("Remotely_Installer"))
@@ -174,7 +171,7 @@ namespace Remotely.Agent.Services
                        serverUrl + $"/api/AgentUpdate/DownloadPackage/linux/{downloadId}",
                        zipPath);
 
-                    await WebRequest.CreateHttp(serverUrl + $"/api/AgentUpdate/ClearDownload/{downloadId}").GetResponseAsync();
+                    (await WebRequest.CreateHttp(serverUrl + $"/api/AgentUpdate/ClearDownload/{downloadId}").GetResponseAsync()).Dispose();
 
                     Logger.Write("Launching installer to perform update.");
 
@@ -191,9 +188,16 @@ namespace Remotely.Agent.Services
             {
                 Logger.Write(ex);
             }
+            finally
+            {
+                InstallLatestVersionLock.Release();
+            }
         }
 
-
+        private async void UpdateTimer_Elapsed(object sender, System.Timers.ElapsedEventArgs e)
+        {
+            await CheckForUpdates();
+        }
         private class WebClientEx : WebClient
         {
             private readonly int _requestTimeout;
