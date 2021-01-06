@@ -4,11 +4,14 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
+using Remotely.Server.Hubs;
 using Remotely.Server.Services;
 using Remotely.Shared.Enums;
 using Remotely.Shared.Models;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
+using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading.Tasks;
@@ -20,12 +23,14 @@ namespace Remotely.Server.Areas.Identity.Pages.Account.Manage
         public ServerConfigModel(IConfiguration configuration,
             IWebHostEnvironment hostEnv,
             UserManager<RemotelyUser> userManager,
-            IDataService dataService)
+            IDataService dataService,
+            IEmailSenderEx emailSender)
         {
             Configuration = configuration;
             HostEnv = hostEnv;
             UserManager = userManager;
             DataService = dataService;
+            EmailSender = emailSender;
         }
 
         public enum DBProviders
@@ -44,6 +49,8 @@ namespace Remotely.Server.Areas.Identity.Pages.Account.Manage
         public bool IsServerAdmin { get; set; }
         public string Environment { get; set; }
 
+        public IEnumerable<string> OutdatedDevices { get; set; }
+
         [BindProperty]
         [Display(Name = "Server Admins")]
         public List<string> ServerAdmins { get; set; } = new List<string>();
@@ -53,17 +60,24 @@ namespace Remotely.Server.Areas.Identity.Pages.Account.Manage
 
         private IConfiguration Configuration { get; }
         private IDataService DataService { get; }
+        private IEmailSenderEx EmailSender { get; }
         private IWebHostEnvironment HostEnv { get; }
         private UserManager<RemotelyUser> UserManager { get; }
 
         public async Task<IActionResult> OnGet()
         {
             IsServerAdmin = (await UserManager.GetUserAsync(User)).IsServerAdmin;
-            Environment = HostEnv.EnvironmentName;
             if (!IsServerAdmin)
             {
                 return Unauthorized();
             }
+
+            var highestVersion = AgentHub.ServiceConnections.Values.Max(x => Version.TryParse(x.AgentVersion, out var result) ? result : default);
+            OutdatedDevices = AgentHub.ServiceConnections.Values
+                .Where(x => Version.TryParse(x.AgentVersion, out var result) ? result != highestVersion : false)
+                .Select(x => x.ID);
+
+            Environment = HostEnv.EnvironmentName;
 
             Configuration.Bind("ApplicationOptions", AppSettingsInput);
             Configuration.Bind("ConnectionStrings", ConnectionStrings);
@@ -71,8 +85,22 @@ namespace Remotely.Server.Areas.Identity.Pages.Account.Manage
 
             return Page();
         }
-
-        public async Task<IActionResult> OnPost()
+        public async Task<IActionResult> OnPostSaveAndTestSmtpAsync()
+        {
+            var result = await OnPostSaveAsync();
+            var user = DataService.GetUserByName(User.Identity.Name);
+            var success = await EmailSender.SendEmailAsync(user.Email, "Remotely Test Email", "Congratulations! Your SMTP settings are working!", user.OrganizationID);
+            if (success)
+            {
+                StatusMessage = "Test email sent.  Check your inbox (including spam folder).";
+            }
+            else
+            {
+                StatusMessage = "Error sending email.  Check the server logs for details.";
+            }
+            return result;
+        }
+        public async Task<IActionResult> OnPostSaveAsync()
         {
             IsServerAdmin = (await UserManager.GetUserAsync(User)).IsServerAdmin;
             if (!IsServerAdmin)

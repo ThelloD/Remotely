@@ -96,6 +96,7 @@ export function Prompt(promptMessage: string): Promise<string> {
     });
 }
 
+
 export function SetScreenSize(width: number, height: number) {
     ScreenViewer.width = width;
     ScreenViewer.height = height;
